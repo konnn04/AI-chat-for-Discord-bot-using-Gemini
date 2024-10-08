@@ -9,9 +9,10 @@ Lưu ý: Dự án chỉ phục vụ mục đích học tập
 4. [Lấy API Key của Gemini từ AI Studio](#lấy-api-key-của-gemini-từ-ai-studio)
 5. [Cấu hình Bot](#cấu-hình-bot)
 6. [Chạy Bot](#chạy-bot)
+7. [Ghi chú](#ghi-chú)
 
 ## Giới thiệu
-Bot này được thiết kế để tương tác với người dùng trên Discord, sử dụng API của Google Generative AI để tạo ra các phản hồi thông minh và tự nhiên.
+Bot này được thiết kế để tương tác với người dùng trên Discord, sử dụng API của Google Generative AI để tạo ra các phản hồi thông minh và tự nhiên. Chúng tôi khuyến khích bạn chạy server trên Konya để có trải nghiệm tốt nhất.
 
 ## Cài đặt
 1. Clone repository này về máy của bạn:
@@ -36,6 +37,7 @@ Bot này được thiết kế để tương tác với người dùng trên Dis
         ...
     }
     ```
+5. Để bot có thể đọc tin nhắn chat, hãy đảm bảo rằng bạn đã cấp quyền "Read Messages" và "Read Message History" trong Discord Developer Portal.
 
 ## Lấy API Key của Gemini từ AI Studio
 1. Truy cập [AI Studio của Google](https://aistudio.google.com).
@@ -76,4 +78,6 @@ Bot của bạn bây giờ sẽ hoạt động trên Discord và sử dụng API
 ## Ghi chú
 - Đảm bảo rằng tất cả các dependencies đã được cài đặt và cấu hình đúng.
 - Nếu gặp bất kỳ lỗi nào, kiểm tra lại các bước cấu hình và đảm bảo rằng các thông tin như token và API key đã được nhập đúng.
+- Để có trải nghiệm tốt nhất, hãy chạy server trên Konya.
+- Tại file `prompt.txt`, yêu cầu người dùng tự mô tả ứng dụng của họ.
 
