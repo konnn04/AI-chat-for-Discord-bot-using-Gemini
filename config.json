@@ -1,0 +1,8 @@
+{
+    "token": "PASTE HERE",
+    "gmn-key":"PATSE HERE",
+    "gmn-model":"gemini-1.5-pro-exp-0827",
+    "error-log-guild": "PATSE HERE",
+    "error-log-channel": "PATSE HERE",
+    "recent_chat_max": 20
+}
