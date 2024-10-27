@@ -1,9 +1,10 @@
 const { Events, Client, Collection } = require('discord.js');
-const fs = require('fs');
+const fs = require('fs'); //Quản lý file
 const path = require('path');
 const config = require('../../config.json');
 const axios = require('axios');
-
+const BoxChatAI = require('../textChatAI.js');
+const wlog = require('../tool.js').wlog
 
 const {
 	GoogleGenerativeAI
@@ -24,235 +25,160 @@ const default_chat = JSON.parse(fs.readFileSync(base_chat_path, 'utf8'))
 const error_log_guild = config['error-log-guild']
 const error_log_channel = config['error-log-channel'] 
 
-//Init Model
-const model = genAI.getGenerativeModel({
-	model: config['gmn-model'],
-});
+// const allowed_channels = ["1110426046165172224_1110426047087923222"]
+const allowed_channels = []
 
-//Save last reply time
 let last_reply = new Date().getTime()
-// Delay reply
+
 const delay_reply = 10000
 
-const generationConfig = {
-	temperature: 0,
-	topP: 0.95,
-	topK: 40,
-	maxOutputTokens: 8192,
-	responseMimeType: "text/plain",
-};
+const chats = new Collection();
 
-const chatSessions = new Collection();
-const recent_chats = new Collection()
-const last_attachments = new Collection()
+BoxChatAI.setup(path_default, promt_text, default_chat)
 
 //Limit chat number in recent chat
 const recent_chat_max = config['recent-chat-max']
 
-//Add chat to recent chat
-function addRecentChat(id_channel ,name, content) {
-	if (!content) return
-	recent_chats[id_channel].push({
-		name: name,
-		content: content,
-		timeStamp: new Date().getTime()
-	})
-	console.log("[V] " + id_channel + "| new chat added, have " + recent_chats[id_channel].length + " chat")
 
-	if (recent_chats[id_channel].length > recent_chat_max) {
-		recent_chats[id_channel].shift()
-	}
-}
-
-// Init new Chat
-async function initChat(id_channel) {
-	let history_chat = []
-
-	if (fs.existsSync(path.join(path_default, id_channel+".json"))){
-		history_chat = fs.readFileSync(path.join(path_default, id_channel+".json"), 'utf8')
-		history_chat = JSON.parse(history_chat)
-	}
-
-	const history = [
-		{
-		  role: "user",
-		  parts: [
-			{text: promt_text},
-		  ],
-		},
-		{
-		  role: "model",
-		  parts: [
-			{text: "OK\n"},
-		  ],
-		}
-	]
-
-	default_chat.forEach(chat => {
-		history.push({
-			role: 'user',
-			parts: [
-				{text: `${
-					chat.user.history.map(h => `<chat> ${h.name}: ${h.content} <chat>`).join('\n')
-				}\n` +chat.user.name+": "+chat.user.content},
-			],
-		})
-		history.push({
-			role: 'model',
-			parts: [
-				{text: chat.model.content},
-			],
-		})
-	})
-
-	history_chat.forEach(chat => {
-		history.push({
-			role: 'user',
-			parts: [
-				{text: chat.user.name+": "+chat.user.content},
-			],
-		})
-		history.push({
-			role: 'model',
-			parts: [
-				{text: chat.model.content},
-			],
-		})
-	})
-	
-
-	chatSessions[id_channel] = model.startChat({
-		generationConfig,
-		// safetySettings: Adjust safety settings
-		history: history
-	});
-}
-
+//Save last reply time
 module.exports = {
-	name: Events.MessageCreate,
-	
+	name: Events.MessageCreate,	
 	async execute(message) {
-		const displayName = message.author.displayName		
+		// Ignore
+		if (message.author.bot || message.author.id == message.client.user.id)  return
+		
 		const id_channel = message.guild.id+"_"+message.channel.id
-		console.log("["+message.guild.name+"|"+message.channel.name+"] " +displayName+": "+message.content)
-        if (message.author.id == message.client.user.id) return
 
-		//Check if message has attachment, only process the first attachment
-        if (message.attachments.size > 0) {
+		//Check if the bot is mentioned in the message and reply to it
+		if (message.content == 'hsn!start') {
+			if (allowed_channels.includes(id_channel)) {
+				message.reply('Em sẵn sàng từ lâu rồi, thầy không cần dùng lệnh nữa đâu ạk! 🌟')
+				return
+			}
+			// Add channel to allowed channels
+			allowed_channels.push(id_channel)
+			chats.set(id_channel, new BoxChatAI())
+			chats.get(id_channel).init()
+			message.reply('Hoshino đã sẵn sàng trò chuyện! 🌟')
+			return
+		}
+
+		// Check if the channel is allowed
+		if (checkAllowedChannel(id_channel) == false) return
+
+		const bot = chats.get(id_channel)
+		const displayName = message.author.displayName		
+		// console.log("["+message.guild.name+"|"+message.channel.name+"] " +displayName+": "+message.content)
+        
+		// Check if the message contains an attachment
+		if (message.attachments.size > 0) {
 			const attachment = await fileToGenerativePart(message.attachments.first().url, message.attachments.first().contentType)
-			if (attachment) {
-				last_attachments[id_channel] = attachment
-				console.log("[V] " + id_channel + "| Add attachment")
-			}
+			bot.addAttachment(attachment)
+		}	
+		
+		// Check if the message contains a mention to the bot
+		if  (message.content.includes(`<@${message.client.user.id}>`)) {
+			const now = new Date().getTime()
+			setTimeout(async () => {
+				try {
+					await replyAI(bot, message, id_channel)
+				} catch (error) {
+					wlog(`${id_channel} - ${error}`)
+					sendErrorLog(message, error)
+					console.log('Error: ', error)
+					chats.delete(id_channel)
+					chats.set(id_channel, new BoxChatAI())
+					chats.get(id_channel).init()
+				}
+			}, now - last_reply > delay_reply ? 0 : delay_reply)	
+		}else{
+			bot.addHistory(displayName, processMessage(message))
 		}
-		//Check if message is mention bot
-		if (!message.author.bot) {			
-			if (message.content.includes(`<@${message.client.user.id}>`)) {	
-				const now = new Date().getTime()
-				setTimeout(async () => {
-					await replyAI(message, id_channel)
-				}, now - last_reply > delay_reply ? 0 : delay_reply)
-			}else{
-				addRecentChat(id_channel,displayName,message.content)
-				console.log("[V] + " + id_channel + "| Add chat to recent chat")
-			}
-		}
-	},
+	}
 };
 
-async function replyAI(message, id_channel) {
-	if (!chatSessions[id_channel]) {
-		await initChat(id_channel)
-		console.log("[V] " + id_channel + "| Init chat")
-	}
-	const chatSession = chatSessions[id_channel];
-
-	const displayName = message.author.displayName
-	
-	let  content = displayName+": "+ message.content.replace(`<@${message.client.user.id}>`,'Hoshino')
-	// Replace user mentions with their display names
+function processMessage(message) {
+	let content = message.content;
 	const userMentions = message.mentions.users;
 	userMentions.forEach(user => {
 		const mentionTag = `<@${user.id}>`;
 		const userDisplayName = message.guild.members.cache.get(user.id).displayName;
 		content = content.replace(new RegExp(mentionTag, 'g'), userDisplayName);
 	});
+	return content;
+}
 
-	// Send recent chat
-	history_chat = ""
-	if (recent_chats[id_channel] && recent_chats[id_channel].length > 0) {
-		history_chat = recent_chats[id_channel].map(chat => {
-			return `<chat> ${chat.name}: ${chat.content} <chat>`
-		}).join("\n")				
-		recent_chats[id_channel] = []
-	}	
+async function replyAI(bot, message, id_channel) {
+	const displayName = message.author.displayName	
+	// console.log(message.guild.members.cache.filter(member => member.presences))
+	let  content = displayName+": "+ processMessage(message)
+	const more = `
+	--- Thông tin thêm ---
+	Người gửi: ${displayName}\n
+	Id người gửi: ${message.author.id}\n
+	Server: ${message.guild.name}\n
+	Channel: ${message.channel.name}\n
+	Ngày giờ hiện tại: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}\n
+	Số người trong server: ${message.guild.memberCount}\n
+	--- Kết thúc thông tin thêm ---
+	`.trim()
+	
 
-	const user_question = {
-		"name": displayName,
-        "content": content,
-        "timestamp": new Date().getTime(),
-        "history":recent_chats[id_channel]
-	}
-
-	// Send message to AI
-	try {
-		if (last_attachments[id_channel]) {
-			result = await chatSession.sendMessage([history_chat + content, last_attachments[id_channel]]);
-			last_attachments[id_channel] = null
-		}else{
-			result = await chatSession.sendMessage(history_chat + content);
+	await bot.getReply(displayName, content, more).then(async (reply) => {
+		// Hậu kì
+		if (reply == null) {
+			await message.reply('Em không hiểu ý thầy ạ, thầy nói rõ hơn được không? 🤔')
+			return
 		}
-
-		let replyText = result.response.text();
-		if (replyText.trim().indexOf("<//>")==0) {
-			replyText=replyText.trim().substring(4)
-		}
-		const replyArray = replyText.split('<//>');
-
-		for (const [index, line] of replyArray.entries()) {
-			try {
-				await (index === 0 ? message.reply(line) : message.channel.send(line));
-			} catch (error) {
-				console.log("[V] Error when send the message: ", error);
-				sendErrorLog(message, error)
+		
+		const msgs = reply.split('</drop_chat>')
+		let i = 0;
+		for (const msg of msgs) {
+			if (i == 0) {
+				if (msg.trim().length > 0) {
+					await message.reply(msg.trim())
+				}
+				i++
+			} else {
+				if (msg.trim().length > 0) {
+					await message.channel.send(msg.trim())
+				}
 			}
+			
 		}
+		// Save chat history
+		console.log("["+message.guild.name+"|"+message.channel.name+"] Hoshino: "+reply)
+		// Save chat history
+		const chat = bot.exportChat()
+		saveChat(id_channel, chat)
 
-		const model_reply = {
-			"name": message.client.user.username,
-			"content": replyText,
-			"timestamp": new Date().getTime(),
-			"history":[]
-		}		
-
-		const item = {
-			user: user_question,
-			model: model_reply
-		}
-
-		const chat_path = path.join(path_default, id_channel + '.json')
-
-		if (!fs.existsSync(chat_path)){
-			obj = JSON.stringify([item])
-			fs.writeFileSync(chat_path, obj, { flag: 'w+' })
-		}else{
-			const load_chat = JSON.parse(fs.readFileSync(chat_path, 'utf8'))
-			load_chat.push(item)
-			obj = JSON.stringify(load_chat)
-			fs.writeFileSync(chat_path, obj)
-		}
-
-	} catch (error) {
-		console.log(error)
-		await message.reply('[Error] Sensei làm em chóng mặt quá, cho em nghỉ một chút nhé! 😵');
+	}).catch(async (error) => {
+		wlog(`${id_channel} - ${error}`)
+		await message.reply('*Sensei làm em chóng mặt quá, cho em nghỉ một chút nhé! *😵');
+		console.log('Error: ', error)
 		sendErrorLog(message, error)
-		initChat()
+		chats.delete(id_channel)
+		chats.set(id_channel, new BoxChatAI())
+		chats.get(id_channel).init()
+	})
+}
+
+function saveChat(id_channel, items) {
+	const chat_path = path.join(path_default, id_channel + '.json')
+	if (!fs.existsSync(chat_path)){
+		obj = JSON.stringify([items])
+		fs.writeFileSync(chat_path, obj, { flag: 'w+' })
+	}else{
+		const load_chat = JSON.parse(fs.readFileSync(chat_path, 'utf8'))
+		load_chat.concat(items)
+		obj = JSON.stringify(load_chat)
+		fs.writeFileSync(chat_path, obj)
 	}
-	return
+
 }
 
 async function fileToGenerativePart(url, contentType) {
-	if (!contentType.includes('image') && !contentType.includes('document')) return null
+	if (!contentType.includes('image') && !contentType.includes('pdf') && !contentType.includes('audio')) return null
 	const response = await axios.get(url, {
 		responseType: 'arraybuffer'
 	})
@@ -271,3 +197,8 @@ function sendErrorLog(message, error) {
 	const error_log = message.client.guilds.cache.get(error_log_guild).channels.cache.get(error_log_channel)
 	error_log.send(`Error: \n${error}`)
 }
+
+function checkAllowedChannel(id_channel) {
+	return allowed_channels.includes(id_channel)
+}
+

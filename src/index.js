@@ -31,7 +31,7 @@ for (const file of eventFiles) {
     const filePath = path.join(eventsPath, file);
     const event = require(filePath);
     if (event.once) {
-        client.once(event.name, async(...args) => await event.execute(...args));
+        client.once(event.name, async(...args) => await event.execute(...args))
     } else {
         client.on(event.name, async(...args) =>await event.execute(...args));
     }
@@ -40,26 +40,8 @@ for (const file of eventFiles) {
 
 
 app.get('/', (req, res) => {
-    res.send('Hello World');
+    res.send();
 });
-
-// app.get('/start', async (req, res) => {
-//     if (status.online) {
-//         res.send('Bot is already online');
-//         return;
-//     }
-
-    
-//     try {
-//         await client.login(config.token);
-//         status.online = true;
-//         res.send('Bot is starting');
-//     } catch (error) {
-//         console.error('Error starting bot:', error);
-//         res.status(500).send('Internal Server Error');
-//     }
-// });
-
 
 app.listen(port, () => {
     console.log(`Server is running at http://localhost:${port}`);    
